@@ -21,44 +21,112 @@ function localDateTimeStr(d = new Date()) {
   return `${localDateStr(d)}T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
 }
 
-// The launch check-in rings 10 seconds after the Road page loads and always
-// asks about TODAY's first unfinished task. If nothing is scheduled for today,
-// no alarm fires.
+const STOP = new Set([
+  "today", "task", "have", "done", "this", "yet", "your", "did", "you", "the",
+  "and", "for", "are", "with", "from", "prep", "at", "about", "complete",
+  "reminder", "missed", "should", "what",
+]);
+
+function topicTokens(question) {
+  return new Set(
+    String(question || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length > 3 && !STOP.has(w))
+  );
+}
+
+// Stable-ish key for Sets; overlap matching is what decides "same topic".
+export function alarmTopicKey(question) {
+  return [...topicTokens(question)].sort().slice(0, 6).join("|");
+}
+
+// "Did you pick up CLENPIQ at Walgreens" ≈ "Today's task: Pick up CLENPIQ bowel prep at Walgreens"
+export function sameAlarmTopic(a, b) {
+  const qa = typeof a === "string" ? a : a?.question;
+  const qb = typeof b === "string" ? b : b?.question;
+  const ta = topicTokens(qa);
+  const tb = topicTokens(qb);
+  if (!ta.size || !tb.size) return false;
+  let overlap = 0;
+  for (const t of ta) if (tb.has(t)) overlap++;
+  const minSize = Math.min(ta.size, tb.size);
+  return overlap >= 2 && overlap / minSize >= 0.5;
+}
+
+function dedupeByTopic(list) {
+  const out = [];
+  for (const a of list) {
+    if (out.some((kept) => sameAlarmTopic(kept, a))) continue;
+    out.push(a);
+  }
+  return out;
+}
+
+function mentionsTask(question, title) {
+  if (!question || !title) return false;
+  const q = question.toLowerCase();
+  const t = title.toLowerCase();
+  if (q.includes(t.slice(0, 18))) return true;
+  const words = t.split(/\s+/).filter((w) => w.length > 4);
+  const hits = words.filter((w) => q.includes(w));
+  return hits.length >= 2 || (words.length === 1 && hits.length === 1);
+}
+
+// Demo check-in: ring in 10s about today's first unfinished task, without
+// creating a second popup when a plan alarm already covers that task.
 export function ensureDemoAlarm(timeline, checklist = {}) {
-  const alarms = loadAlarms();
+  const alarms = loadAlarms().filter((a) => a.id !== "demo");
   const today = localDateStr();
   const todaysTask = (timeline || []).find(
     (e) => e.date === today && !checklist[`${e.date}::${e.title}`]
   );
-  const withoutDemo = alarms.filter((a) => a.id !== "demo");
   if (!todaysTask) {
-    saveAlarms(withoutDemo);
-    return withoutDemo;
+    saveAlarms(alarms);
+    return alarms;
   }
-  const ringAt = new Date(Date.now() + 10_000);
+
+  const ringAt = localDateTimeStr(new Date(Date.now() + 10_000));
+  const existing = alarms.find(
+    (a) =>
+      a.status === "pending" &&
+      localDateStr(new Date(a.datetime)) === today &&
+      mentionsTask(a.question, todaysTask.title)
+  );
+
+  if (existing) {
+    // Reuse the plan alarm as the launch demo — no duplicate question.
+    const next = alarms.map((a) =>
+      a.id === existing.id ? { ...a, datetime: ringAt } : a
+    );
+    saveAlarms(next);
+    return next;
+  }
+
   const next = [
     {
       id: "demo",
-      datetime: localDateTimeStr(ringAt),
+      datetime: ringAt,
       question: `Today's task: ${todaysTask.title}. Have you done this yet?`,
       status: "pending",
     },
-    ...withoutDemo,
+    ...alarms,
   ];
   saveAlarms(next);
   return next;
 }
 
-// Only surface alarms that belong to today. Yesterday's misses are visible on
-// the timeline; notifications stay focused on what is due now.
+// Only surface alarms that belong to today. Deduped so one topic = one popup.
 export function dueAlarms(alarms, now = Date.now()) {
   const today = localDateStr(new Date(now));
-  return alarms.filter(
+  const due = alarms.filter(
     (a) =>
       a.status === "pending" &&
       new Date(a.datetime).getTime() <= now &&
       localDateStr(new Date(a.datetime)) === today
   );
+  return dedupeByTopic(due);
 }
 
 // A patient-added reminder rides the same alarm pipeline.
@@ -69,10 +137,19 @@ export function addCustomAlarm(id, datetime, question) {
   return alarms;
 }
 
+// Mark one alarm and any same-topic pending twins (demo + plan duplicates).
 export function setAlarmStatus(id, status) {
-  const alarms = loadAlarms().map((a) => (a.id === id ? { ...a, status } : a));
-  saveAlarms(alarms);
-  return alarms;
+  const alarms = loadAlarms();
+  const target = alarms.find((a) => a.id === id);
+  const next = alarms.map((a) => {
+    if (a.id === id) return { ...a, status };
+    if (target && a.status === "pending" && sameAlarmTopic(target, a)) {
+      return { ...a, status };
+    }
+    return a;
+  });
+  saveAlarms(next);
+  return next;
 }
 
 // Stable id for a timeline event, used to key its checklist and reminder state.
@@ -80,9 +157,6 @@ export function eventId(event) {
   return `${event.date}::${event.title}`;
 }
 
-// Toggle a reminder alarm for a single timeline task. Reuses the same
-// pending/missed alarm pipeline as the plan-generated alarms, so it shows up
-// in RoadToProcedure's due/missed-alarm polling automatically.
 export function setTaskReminder(event, enabled) {
   const id = `task-${eventId(event)}`;
   const alarms = loadAlarms().filter((a) => a.id !== id);

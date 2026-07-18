@@ -2,15 +2,20 @@ import { useEffect, useRef, useState } from "react";
 import { chat, classifyPrep, fileToBase64 } from "../lib/api.js";
 import { loadChat, saveChat, loadCustom, saveCustom } from "../lib/storage.js";
 import { addCustomAlarm, requestNotificationPermission } from "../lib/alarms.js";
-import { shareAnswerPdf } from "../lib/pdf.js";
-
 // Render **bold** markers from the model as real bold text.
 function Rich({ text }) {
   const parts = String(text).split(/\*\*(.+?)\*\*/gs);
   return parts.map((p, i) => (i % 2 ? <strong key={i}>{p}</strong> : p));
 }
 
-export default function ChatDrawer({ intake, plan, missedAlarmEvent, onOpenVoice }) {
+export default function ChatDrawer({
+  intake,
+  plan,
+  missedAlarmEvent,
+  taskChatEvent,
+  onOpenVoice,
+  onOpenChange,
+}) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState(() => {
     const saved = loadChat();
@@ -24,28 +29,80 @@ export default function ChatDrawer({ intake, plan, missedAlarmEvent, onOpenVoice
   const fileRef = useRef(null);
   const scrollRef = useRef(null);
   const lastMissedTs = useRef(null);
+  const lastTaskTs = useRef(null);
+  const messagesRef = useRef(messages);
+  const busyRef = useRef(false);
+  const missedQueue = useRef([]);
+  const drainingMissed = useRef(false);
 
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+  useEffect(() => {
+    busyRef.current = busy;
+  }, [busy]);
   useEffect(() => saveChat(messages), [messages]);
   useEffect(() => {
     scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
   }, [messages, busy, open]);
 
-  // A missed alarm opens the chat and asks the agent for recovery guidance.
+  function setDrawerOpen(next) {
+    setOpen(next);
+    onOpenChange?.(next);
+  }
+
+  // Missed alarms open chat immediately; queue recovery replies so answering
+  // a second due task while the first reply is loading still works.
   useEffect(() => {
     if (!missedAlarmEvent || missedAlarmEvent.ts === lastMissedTs.current) return;
     lastMissedTs.current = missedAlarmEvent.ts;
-    const { alarm } = missedAlarmEvent;
-    setOpen(true);
+    missedQueue.current.push(missedAlarmEvent.alarm);
+    setDrawerOpen(true);
+    drainMissedQueue();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missedAlarmEvent]);
+
+  // Timeline "Ask about this task" opens chat with that step's context.
+  useEffect(() => {
+    if (!taskChatEvent || taskChatEvent.ts === lastTaskTs.current) return;
+    lastTaskTs.current = taskChatEvent.ts;
+    const { event } = taskChatEvent;
+    setDrawerOpen(true);
     const userMsg = {
       role: "user",
-      content: `I missed this: "${alarm.question}". What should I do now?`,
+      content: `I have a question about this task on my plan: "${event.title}"${
+        event.time ? ` at ${event.time}` : ""
+      } on ${event.date}. ${event.details || ""} Can you walk me through what I should do?`,
     };
     sendToAgent(
       userMsg,
-      `The patient just reported MISSING a scheduled prep step. The reminder was: "${alarm.question}" (scheduled for ${alarm.datetime}). Explain calmly what this means, what to focus on right now to still achieve adequate prep and a safe procedure, and when they should call the GI office instead.`
+      `The patient tapped Ask about this task on their Road to Procedure. Task: "${event.title}" (${event.date}${
+        event.time ? ` ${event.time}` : ""
+      }). Details from their plan: ${event.details || "(none)"}. Explain clearly using their intake record. If this is the stool-clear check, tell them to photograph their most recent stool in the toilet bowl and send it here, and that ready stool should look apple-juice colored (light yellow and see-through) with the bowl bottom visible.`
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [missedAlarmEvent]);
+  }, [taskChatEvent]);
+
+  async function drainMissedQueue() {
+    if (drainingMissed.current) return;
+    drainingMissed.current = true;
+    try {
+      while (missedQueue.current.length) {
+        const alarm = missedQueue.current.shift();
+        const userMsg = {
+          role: "user",
+          content: `I missed this: "${alarm.question}". What should I do now?`,
+        };
+        await sendToAgent(
+          userMsg,
+          `The patient just reported MISSING a scheduled prep step. The reminder was: "${alarm.question}" (scheduled for ${alarm.datetime}). Explain calmly what this means, what to focus on right now to still achieve adequate prep and a safe procedure, and when they should call the GI office instead.`
+        );
+      }
+    } finally {
+      drainingMissed.current = false;
+      if (missedQueue.current.length) drainMissedQueue();
+    }
+  }
 
   // Route each question to the matching expert agent for a faster, sharper answer.
   function agentFor(text) {
@@ -59,18 +116,27 @@ export default function ChatDrawer({ intake, plan, missedAlarmEvent, onOpenVoice
   }
 
   async function sendToAgent(userMsg, context) {
-    setMessages((prev) => [...prev, userMsg]);
+    const withUser = [...messagesRef.current, userMsg];
+    messagesRef.current = withUser;
+    setMessages(withUser);
     setBusy(true);
     try {
-      const history = [...messagesForApi(), { role: "user", content: userMsg.content }];
+      const history = withUser.map((m) => ({
+        role: m.role,
+        content: m.image ? m.content || "[patient sent a bowel prep photo]" : m.content,
+      }));
       const topic = agentFor(userMsg.content);
       const { reply } = await chat(history, intake, { context, agent: topic });
-      setMessages((prev) => [...prev, { role: "assistant", content: reply, topic }]);
+      const withReply = [...messagesRef.current, { role: "assistant", content: reply, topic }];
+      messagesRef.current = withReply;
+      setMessages(withReply);
     } catch (e) {
-      setMessages((prev) => [
-        ...prev,
+      const withErr = [
+        ...messagesRef.current,
         { role: "assistant", content: `Sorry, something went wrong: ${e.message}` },
-      ]);
+      ];
+      messagesRef.current = withErr;
+      setMessages(withErr);
     } finally {
       setBusy(false);
     }
@@ -88,13 +154,13 @@ export default function ChatDrawer({ intake, plan, missedAlarmEvent, onOpenVoice
     const trimmed = (text ?? input).trim();
     if (!trimmed || busy) return;
     setInput("");
-    setOpen(true);
+    setDrawerOpen(true);
     sendToAgent({ role: "user", content: trimmed });
   }
 
   async function handleImage(file) {
     if (!file || busy) return;
-    setOpen(true);
+    setDrawerOpen(true);
     setBusy(true);
     const dataUrl = await new Promise((resolve) => {
       const r = new FileReader();
@@ -124,20 +190,6 @@ export default function ChatDrawer({ intake, plan, missedAlarmEvent, onOpenVoice
     } finally {
       setBusy(false);
     }
-  }
-
-  function makePdf(message) {
-    const patientName = [
-      intake?.demographics?.name?.firstName,
-      intake?.demographics?.name?.lastName,
-    ]
-      .filter(Boolean)
-      .join(" ");
-    shareAnswerPdf({
-      patientName,
-      procedure: intake?.procedureInformation?.procedure,
-      content: message.content,
-    });
   }
 
   // Build grocery-run reminders from the patient's diet phases: shop the day
@@ -188,7 +240,7 @@ export default function ChatDrawer({ intake, plan, missedAlarmEvent, onOpenVoice
 
   return (
     <div className={`chat-drawer ${open ? "open" : ""}`}>
-      <button className="drawer-handle" onClick={() => setOpen(!open)}>
+      <button className="drawer-handle" onClick={() => setDrawerOpen(!open)}>
         {open ? <span className="handle-bar" /> : null}
         {open ? "Hide chat" : "✨ How can I help?"}
       </button>
@@ -201,16 +253,11 @@ export default function ChatDrawer({ intake, plan, missedAlarmEvent, onOpenVoice
                 {m.image && <img className="bubble-img" src={m.image} alt="prep" />}
                 <Rich text={m.content} />
               </div>
-              {m.role === "assistant" && !m.verdict && !busy && i > 0 && (
+              {m.role === "assistant" && m.topic === "diet" && !busy && (
                 <div className="answer-actions">
-                  <button className="answer-chip" onClick={() => makePdf(m)}>
-                    📄 PDF to send someone?
+                  <button className="answer-chip" onClick={addGroceryReminders}>
+                    🛒 Add grocery reminders?
                   </button>
-                  {m.topic === "diet" && (
-                    <button className="answer-chip" onClick={addGroceryReminders}>
-                      🛒 Add grocery reminders?
-                    </button>
-                  )}
                 </div>
               )}
             </div>
@@ -244,7 +291,7 @@ export default function ChatDrawer({ intake, plan, missedAlarmEvent, onOpenVoice
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && send()}
-          onFocus={() => setOpen(true)}
+          onFocus={() => setDrawerOpen(true)}
           placeholder="Ask me anything about your prep…"
           disabled={busy}
         />

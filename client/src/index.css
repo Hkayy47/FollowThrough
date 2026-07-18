@@ -300,15 +300,23 @@ button { font-family: inherit; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* Alarm bottom sheet (non-blocking) */
+/* Alarm bottom sheet (non-blocking; stays above chat when elevated) */
 .alarm-sheet {
-  position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 60;
+  position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 70;
   background: var(--card); border-radius: 22px; padding: 16px 18px;
   box-shadow: var(--shadow-lift); animation: slide-up 0.28s ease;
+}
+.alarm-sheet.elevated {
+  bottom: auto; top: 72px;
+  box-shadow: 0 12px 32px rgba(20, 40, 48, 0.22);
 }
 .alarm-sheet-row { display: flex; gap: 12px; align-items: flex-start; }
 .alarm-bell { font-size: 26px; animation: ring 0.8s ease 2; }
 .alarm-sheet-text { flex: 1; text-align: left; }
+.alarm-queue {
+  font-size: 11.5px; font-weight: 700; color: var(--teal-dark);
+  margin-bottom: 4px; text-transform: none; letter-spacing: 0;
+}
 .alarm-when { font-size: 11.5px; color: var(--ink-soft); margin-bottom: 2px; }
 .alarm-sheet h3 { font-size: 14.5px; line-height: 1.4; font-weight: 700; }
 .alarm-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 12px; }
@@ -443,4 +451,11 @@ button { font-family: inherit; }
 .reminder-hint {
   font-size: 11.5px; color: var(--ink-soft); line-height: 1.4; margin: 0;
 }
-.tl-remove { font-size: 11.5px; color: var(--danger); font-weight: 600; margin-top: 4px; cursor: pointer; }
+.tl-ask {
+  display: inline-flex; align-items: center; gap: 4px; margin-top: 8px;
+  font-size: 12px; font-weight: 700; color: var(--teal-dark);
+  background: var(--teal-soft); border-radius: 999px; padding: 5px 11px;
+  cursor: pointer; width: fit-content;
+}
+.tl-ask:hover { background: #d2ecee; }
+.tl-remove { font-size: 11.5px; color: var(--danger); font-weight: 600; margin-top: 6px; cursor: pointer; }

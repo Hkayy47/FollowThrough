@@ -11,7 +11,9 @@ import {
   resetAll,
 } from "./lib/storage.js";
 import { initAlarms } from "./lib/alarms.js";
-// Guarantee day-before check-ins exist even if the model omitted them.
+import { ensureStoolClearTask, stripNonPrepMedTasks } from "./lib/planTasks.js";
+
+// Guarantee day-before ride check-in exists even if the model omitted it.
 function ensureDayBeforeTasks(plan, intake) {
   const proc = (intake?.procedureInformation?.datetimeOfProcedure || "").slice(0, 10) ||
     [...plan.timeline].sort((a, b) => a.date.localeCompare(b.date)).at(-1)?.date;
@@ -36,24 +38,7 @@ function ensureDayBeforeTasks(plan, intake) {
       question: "Have you confirmed who is picking you up after your procedure?",
     });
   }
-
-  if (!plan.timeline.some((e) => /stool|clear yellow|prep.*clear|bowel.*clear/i.test(e.title))) {
-    plan.timeline.push({
-      date: dayBefore,
-      time: "21:00",
-      title: "Confirm your stools are clear",
-      size: "minor",
-      details:
-        "By bedtime the night before, stool should look like clear or light yellow liquid with the bottom of the bowl visible. That means the colon is clean enough for the camera to see the lining. If it is still brown, cloudy, or has solid bits, call the GI office before you go to sleep.",
-    });
-  }
-  if (!plan.alarms.some((a) => /stool|clear yellow|bowel.*clear/i.test(a.question))) {
-    plan.alarms.push({
-      datetime: `${dayBefore}T21:00`,
-      question: "Are your stools clear yellow liquid with no solid bits?",
-    });
-  }
-  return plan;
+  return ensureStoolClearTask(stripNonPrepMedTasks(plan), intake);
 }
 
 // Fill missing clock times from alarms, procedure datetime, or details text
@@ -113,7 +98,10 @@ export default function App() {
     setStatus("planning");
     try {
       const { plan: rawPlan } = await buildPlan(newIntake);
-      const newPlan = enrichPlanTimes(ensureDayBeforeTasks(rawPlan, newIntake), newIntake);
+      const newPlan = enrichPlanTimes(
+        ensureDayBeforeTasks(rawPlan, newIntake),
+        newIntake
+      );
       saveIntake(newIntake);
       savePlan(newPlan);
       initAlarms(newPlan.alarms);

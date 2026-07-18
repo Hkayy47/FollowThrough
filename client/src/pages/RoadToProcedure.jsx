@@ -12,14 +12,15 @@ import {
   notify,
   playChime,
   addCustomAlarm,
+  sameAlarmTopic,
 } from "../lib/alarms.js";
 import { loadAlarms, loadChecklist, savePlan } from "../lib/storage.js";
+import { ensureStoolClearTask } from "../lib/planTasks.js";
 
 function enrichPlanTimes(plan, intake) {
   const procIso = intake?.procedureInformation?.datetimeOfProcedure || "";
   const procTime = procIso.includes("T") ? procIso.slice(11, 16) : "";
   const procDate = procIso.slice(0, 10);
-  let alarms = [...(plan.alarms || [])];
   let changed = false;
 
   // Keep task cards visually consistent (no special major styling).
@@ -30,35 +31,25 @@ function enrichPlanTimes(plan, intake) {
     }
     return event;
   });
+  let next = { ...plan, timeline };
 
-  // Day-before clear-stool check-in if the stored plan is missing it.
-  if (procDate && !timeline.some((e) => /stool|clear yellow|prep.*clear|bowel.*clear/i.test(e.title))) {
-    const [y, m, d] = procDate.split("-").map(Number);
-    const before = new Date(y, m - 1, d - 1);
-    const dayBefore = `${before.getFullYear()}-${String(before.getMonth() + 1).padStart(2, "0")}-${String(before.getDate()).padStart(2, "0")}`;
-    timeline = [
-      ...timeline,
-      {
-        date: dayBefore,
-        time: "21:00",
-        title: "Confirm your stools are clear",
-        size: "minor",
-        details:
-          "By bedtime the night before, stool should look like clear or light yellow liquid with the bottom of the bowl visible. That means the colon is clean enough for the camera to see the lining. If it is still brown, cloudy, or has solid bits, call the GI office before you go to sleep.",
-      },
-    ];
+  // Always place stool-clear after the second prep dose (relocates older day-before copies).
+  const withStool = ensureStoolClearTask(next, intake);
+  if (JSON.stringify(withStool.timeline) !== JSON.stringify(next.timeline)) {
     changed = true;
-    if (!alarms.some((a) => /stool|clear yellow|bowel.*clear/i.test(a.question))) {
-      const stoolAlarm = {
-        datetime: `${dayBefore}T21:00`,
-        question: "Are your stools clear yellow liquid with no solid bits?",
-      };
-      alarms = [...alarms, stoolAlarm];
-      addCustomAlarm("plan-stool-clear", stoolAlarm.datetime, stoolAlarm.question);
+    next = withStool;
+    const stool = next.timeline.find((e) => /stools are clear/i.test(e.title));
+    if (stool) {
+      addCustomAlarm(
+        "plan-stool-clear",
+        `${stool.date}T${stool.time || "06:00"}`,
+        "Are your stools clear yellow liquid with no solid bits? Take a clear photo if you want a final check."
+      );
     }
   }
 
-  timeline = timeline.map((event) => {
+  let alarms = [...(next.alarms || [])];
+  timeline = next.timeline.map((event) => {
     if (event.time) return event;
     const title = (event.title || "").toLowerCase();
     const alarm = alarms.find((a) => {
@@ -86,7 +77,7 @@ function enrichPlanTimes(plan, intake) {
     }
     return event;
   });
-  return changed ? { ...plan, timeline, alarms } : plan;
+  return changed ? { ...next, timeline, alarms: next.alarms } : plan;
 }
 
 export default function RoadToProcedure({ intake, plan: planProp, onReset }) {
@@ -98,9 +89,12 @@ export default function RoadToProcedure({ intake, plan: planProp, onReset }) {
   const [alarms, setAlarms] = useState([]);
   const [popupQueue, setPopupQueue] = useState([]); // alarm objects awaiting an answer
   const [missedAlarmEvent, setMissedAlarmEvent] = useState(null); // {alarm, ts}
+  const [taskChatEvent, setTaskChatEvent] = useState(null); // {event, ts}
+  const [chatOpen, setChatOpen] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const queuedIds = useRef(new Set());
+  const popupQueueRef = useRef([]);
 
   // On launch: arm the demo alarm, surface anything already past due (missed
   // while the app was closed), then poll for alarms coming due while open.
@@ -110,13 +104,20 @@ export default function RoadToProcedure({ intake, plan: planProp, onReset }) {
     setAlarms(initial);
 
     const enqueue = (due, ring) => {
-      const fresh = due.filter((a) => !queuedIds.current.has(a.id));
-      if (!fresh.length) return;
-      fresh.forEach((a) => queuedIds.current.add(a.id));
-      setPopupQueue((q) => [...q, ...fresh]);
+      const current = popupQueueRef.current;
+      const add = due.filter((a) => {
+        if (queuedIds.current.has(a.id)) return false;
+        if (current.some((kept) => sameAlarmTopic(kept, a))) return false;
+        return true;
+      });
+      if (!add.length) return;
+      add.forEach((a) => queuedIds.current.add(a.id));
+      const next = [...current, ...add];
+      popupQueueRef.current = next;
+      setPopupQueue(next);
       if (ring) {
         playChime();
-        fresh.forEach((a) => notify(a.question));
+        add.forEach((a) => notify(a.question));
       }
     };
 
@@ -132,8 +133,14 @@ export default function RoadToProcedure({ intake, plan: planProp, onReset }) {
   function answerAlarm(alarm, didIt) {
     const updated = setAlarmStatus(alarm.id, didIt ? "done" : "missed");
     setAlarms(updated);
-    setPopupQueue((q) => q.filter((a) => a.id !== alarm.id));
+    // Drop this alarm and any same-topic twin still waiting in the queue.
+    const nextQueue = popupQueueRef.current.filter(
+      (a) => a.id !== alarm.id && !sameAlarmTopic(a, alarm)
+    );
+    popupQueueRef.current = nextQueue;
+    setPopupQueue(nextQueue);
     if (!didIt) {
+      setChatOpen(true);
       setMissedAlarmEvent({ alarm, ts: Date.now() });
     }
   }
@@ -167,14 +174,21 @@ export default function RoadToProcedure({ intake, plan: planProp, onReset }) {
       </header>
 
       <div className="road-scroll">
-        <Timeline events={plan.timeline} procedureDate={procedureDate} planAlarms={plan.alarms} />
+        <Timeline
+          events={plan.timeline}
+          procedureDate={procedureDate}
+          planAlarms={plan.alarms}
+          onAskAboutTask={(event) => setTaskChatEvent({ event, ts: Date.now() })}
+        />
       </div>
 
       <ChatDrawer
         intake={intake}
         plan={plan}
         missedAlarmEvent={missedAlarmEvent}
+        taskChatEvent={taskChatEvent}
         onOpenVoice={() => setVoiceOpen(true)}
+        onOpenChange={setChatOpen}
       />
 
       {showInfo && (
@@ -186,7 +200,12 @@ export default function RoadToProcedure({ intake, plan: planProp, onReset }) {
       )}
 
       {popupQueue.length > 0 && (
-        <AlarmPopup alarm={popupQueue[0]} onAnswer={answerAlarm} />
+        <AlarmPopup
+          alarm={popupQueue[0]}
+          onAnswer={answerAlarm}
+          queueLength={popupQueue.length}
+          elevated={chatOpen}
+        />
       )}
 
       {voiceOpen && <VoiceAgent intake={intake} onClose={() => setVoiceOpen(false)} />}

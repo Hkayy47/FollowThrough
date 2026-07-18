@@ -14,8 +14,9 @@ import {
   addCustomAlarm,
 } from "../lib/alarms.js";
 import { downloadEventIcs } from "../lib/ics.js";
+import { STOOL_DETAILS } from "../lib/planTasks.js";
 
-export default function Timeline({ events, procedureDate, planAlarms }) {
+export default function Timeline({ events, procedureDate, planAlarms, onAskAboutTask }) {
   const [expanded, setExpanded] = useState(null);
   const [checklist, setChecklist] = useState(loadChecklist);
   const [alarms, setAlarms] = useState(loadAlarms);
@@ -34,7 +35,10 @@ export default function Timeline({ events, procedureDate, planAlarms }) {
   }, []);
 
   const merged = [...(events || []), ...custom];
-  const sorted = merged.sort((a, b) => a.date.localeCompare(b.date));
+  const sorted = merged.sort(
+    (a, b) =>
+      a.date.localeCompare(b.date) || (a.time || "99:99").localeCompare(b.time || "99:99")
+  );
   const todayStr = localDateStr(new Date());
   const procDate = (procedureDate || sorted[sorted.length - 1]?.date || todayStr).slice(0, 10);
 
@@ -240,7 +244,25 @@ export default function Timeline({ events, procedureDate, planAlarms }) {
                             {t ? fmtTime(t) : "All day"}
                           </em>
                         </span>
-                        {open && <span className="tl-details">{event.details}</span>}
+                        {open && (
+                          <span className="tl-details">
+                            {/stools are clear/i.test(event.title) ? STOOL_DETAILS : event.details}
+                          </span>
+                        )}
+                        {open && (
+                          <span
+                            className="tl-ask"
+                            role="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onAskAboutTask?.(event);
+                            }}
+                          >
+                            {/stools are clear/i.test(event.title)
+                              ? "💬 Ask / send stool photo"
+                              : "💬 Ask about this task"}
+                          </span>
+                        )}
                         {open && event.custom && (
                           <span
                             className="tl-remove"
