@@ -85,7 +85,7 @@ export default function RoadToProcedure({ intake, plan, onReset }) {
       </header>
 
       <div className="road-scroll">
-        <Timeline events={plan.timeline} />
+        <Timeline events={plan.timeline} procedureDate={procedureDate} />
       </div>
 
       <ChatDrawer intake={intake} plan={plan} missedAlarmEvent={missedAlarmEvent} />

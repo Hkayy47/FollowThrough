@@ -1,4 +1,4 @@
-# FollowThrough — Pre-Op Navigator
+# FollowThrough — AllClear
 
 **Anthropic x Abridge AI Health Hackathon**
 
@@ -6,13 +6,13 @@ A patient-facing app (web demo of a mobile experience) that coordinates care fro
 
 ## What the demo does
 
-1. **Patient Intake** — Open the app ("Pre-Op Navigator") and choose one of three inputs:
+1. **Patient Intake** — Open the app ("AllClear") and choose one of three inputs:
    - 📷 **Camera** — placeholder in the demo (shows a "not available" toast)
    - 📄 **Upload** — drop in a PDF After Visit Summary (use `AVS_Delgado_Maria_07182026.pdf`). Claude reads the document and extracts it into the `patient_intake_schema.json` data contract: procedure date/time/location, medication holds (e.g. Eliquis stop/restart days), diet phases, bowel prep product and timing, pharmacy, and every care-team phone number.
    - ✍️ **Manual mode** — for patients who misplaced their paperwork: pick a specialty (GI live; Cardiology/Surgery/Ortho/Ophtho shown as coming soon) → pick a procedure (Colonoscopy live) → a conversational agent asks the schema-relevant questions (procedure date, blood thinners, diabetes meds, prep instructions, ride home…) and fills the same intake JSON.
 
 2. **Road to Procedure** — From the intake JSON, Claude generates:
-   - A **timeline** from today to procedure day: dotted vertical line, minor events as small nodes, major safety events (anticoagulation holds, prep doses, procedure day) as large nodes. Every event expands into a pre-generated plain-language explanation.
+   - A **timeline** from today to procedure day: dotted vertical line grouped by date, each date labeled by days-until-procedure ("7 days before" … "0 days before"), with that day's action items listed underneath as toggleable checklist tasks (tap to expand a plain-language explanation, tap the checkbox to mark done, tap the bell to turn on a reminder notification).
    - A **greeting** (10–20 words on what the agent understood) and **prompt-suggestion bubbles** ("Explain my AVS to me", diet, meds, pharmacy, bowel prep, "Do you have someone to care for you?").
    - **Alarms** for every actionable step, stored in the app.
    - Top-right **care-team panel**: patient name, procedure location, and tap-to-call numbers (PCP, GI office, pharmacy, emergency contact).

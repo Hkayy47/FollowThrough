@@ -48,6 +48,34 @@ export function setAlarmStatus(id, status) {
   return alarms;
 }
 
+// Stable id for a timeline event, used to key its checklist and reminder state.
+export function eventId(event) {
+  return `${event.date}::${event.title}`;
+}
+
+// Toggle a reminder alarm for a single timeline task. Reuses the same
+// pending/missed alarm pipeline as the plan-generated alarms, so it shows up
+// in RoadToProcedure's due/missed-alarm polling automatically.
+export function setTaskReminder(event, enabled) {
+  const id = `task-${eventId(event)}`;
+  const alarms = loadAlarms().filter((a) => a.id !== id);
+  if (enabled) {
+    alarms.push({
+      id,
+      datetime: `${event.date}T09:00`,
+      question: `Did you complete: ${event.title}?`,
+      status: "pending",
+    });
+  }
+  saveAlarms(alarms);
+  return alarms;
+}
+
+export function hasReminder(alarms, event) {
+  const id = `task-${eventId(event)}`;
+  return alarms.some((a) => a.id === id && a.status === "pending");
+}
+
 export function requestNotificationPermission() {
   if ("Notification" in window && Notification.permission === "default") {
     Notification.requestPermission().catch(() => {});
@@ -57,7 +85,7 @@ export function requestNotificationPermission() {
 export function notify(question) {
   if ("Notification" in window && Notification.permission === "granted") {
     try {
-      new Notification("Pre-Op Navigator", { body: question });
+      new Notification("AllClear", { body: question });
     } catch {
       /* ignore */
     }

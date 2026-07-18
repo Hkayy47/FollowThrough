@@ -187,5 +187,5 @@ app.get("/api/health", (_req, res) =>
 
 const port = process.env.PORT || 3001;
 app.listen(port, () =>
-  console.log(`Pre-Op Navigator server listening on :${port}`)
+  console.log(`AllClear server listening on :${port}`)
 );

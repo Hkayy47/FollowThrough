@@ -1,8 +1,9 @@
 const KEYS = {
-  intake: "pon.intake",
-  plan: "pon.plan",
-  alarms: "pon.alarms",
-  chat: "pon.chat",
+  intake: "ac.intake",
+  plan: "ac.plan",
+  alarms: "ac.alarms",
+  chat: "ac.chat",
+  checklist: "ac.checklist",
 };
 
 const read = (key) => {
@@ -23,6 +24,8 @@ export const loadAlarms = () => read(KEYS.alarms) || [];
 export const saveAlarms = (v) => write(KEYS.alarms, v);
 export const loadChat = () => read(KEYS.chat) || [];
 export const saveChat = (v) => write(KEYS.chat, v);
+export const loadChecklist = () => read(KEYS.checklist) || {};
+export const saveChecklist = (v) => write(KEYS.checklist, v);
 
 export function resetAll() {
   Object.values(KEYS).forEach((k) => localStorage.removeItem(k));
