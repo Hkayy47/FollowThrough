@@ -1,0 +1,229 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/patient-intake.schema.json",
+  "title": "PatientIntake",
+  "type": "object",
+  "properties": {
+    "demographics": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "object",
+          "properties": {
+            "firstName": {
+              "type": "string"
+            },
+            "lastName": {
+              "type": "string"
+            }
+          }
+        },
+        "dob": {
+          "type": "string",
+          "format": "date"
+        },
+        "age": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "address": {
+          "type": "object",
+          "properties": {
+            "addressLine1": {
+              "type": "string"
+            },
+            "city": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            },
+            "zipCode": {
+              "type": "string"
+            }
+          }
+        },
+        "cellNumber": {
+          "type": "string"
+        }
+      }
+    },
+    "social": {
+      "type": "object",
+      "properties": {
+        "alternateContact": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "number": {
+              "type": "string"
+            },
+            "relationship": {
+              "type": "string"
+            }
+          }
+        },
+        "insurance": {
+          "type": "string",
+          "enum": [
+            "Private",
+            "Public"
+          ]
+        }
+      }
+    },
+    "procedureInformation": {
+      "type": "object",
+      "properties": {
+        "datetimeOfProcedure": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "procedure": {
+          "type": "string"
+        },
+        "specialtyOfProcedure": {
+          "type": "string"
+        },
+        "locationOfProcedure": {
+          "type": "string"
+        }
+      }
+    },
+    "comorbidities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "nameOfComorbidity": {
+            "type": "string"
+          },
+          "cardiacDisease": {
+            "type": "boolean"
+          },
+          "renalDisease": {
+            "type": "boolean"
+          },
+          "liverDisease": {
+            "type": "boolean"
+          },
+          "pulmonaryDisease": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "homeMedications": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "medicationName": {
+            "type": "string"
+          },
+          "dose": {
+            "type": "string"
+          },
+          "frequency": {
+            "type": "string"
+          },
+          "class": {
+            "type": "string",
+            "enum": [
+              "anticoagulation",
+              "antiplatelet",
+              "nsaids",
+              "diabetes",
+              "steroids",
+              "hypertension",
+              "immunosuppression"
+            ]
+          }
+        }
+      }
+    },
+    "pharmacy": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "object",
+          "properties": {
+            "addressLine1": {
+              "type": "string"
+            },
+            "city": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            },
+            "zipCode": {
+              "type": "string"
+            }
+          }
+        },
+        "phoneNumber": {
+          "type": "string"
+        }
+      }
+    },
+    "visitIntake": {
+      "type": "object",
+      "properties": {
+        "dateOfVisit": {
+          "type": "string",
+          "format": "date"
+        },
+        "dietInstructions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "dietType": {
+                "type": "string"
+              },
+              "daysPriorToProcedure": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "medicationInstructions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "medicationClass": {
+                "type": "string",
+                "enum": [
+                  "anticoagulation",
+                  "antiplatelet",
+                  "nsaids",
+                  "diabetes",
+                  "steroids",
+                  "hypertension",
+                  "immunosuppression"
+                ]
+              },
+              "instruction": {
+                "type": "string",
+                "enum": [
+                  "Continue",
+                  "Hold"
+                ]
+              },
+              "daysPriorToProcedure": {
+                "type": "integer"
+              },
+              "freeTextInstructions": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
