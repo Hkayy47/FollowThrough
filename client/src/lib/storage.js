@@ -4,6 +4,7 @@ const KEYS = {
   alarms: "ac.alarms",
   chat: "ac.chat",
   checklist: "ac.checklist",
+  custom: "ac.custom",
 };
 
 const read = (key) => {
@@ -26,6 +27,12 @@ export const loadChat = () => read(KEYS.chat) || [];
 export const saveChat = (v) => write(KEYS.chat, v);
 export const loadChecklist = () => read(KEYS.checklist) || {};
 export const saveChecklist = (v) => write(KEYS.checklist, v);
+// Patient-added reminders shown on the timeline alongside plan events.
+export const loadCustom = () => read(KEYS.custom) || [];
+export const saveCustom = (v) => {
+  write(KEYS.custom, v);
+  window.dispatchEvent(new Event("ac-custom-updated"));
+};
 
 export function resetAll() {
   Object.values(KEYS).forEach((k) => localStorage.removeItem(k));

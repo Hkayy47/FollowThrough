@@ -15,7 +15,7 @@ export default function Intake({ onUpload, onManual, error }) {
         <div className="logo-mark">🧭</div>
         <h1>AllClear</h1>
         <p className="tagline">
-          Your guide from referral to procedure day — one step at a time.
+          Your guide from referral to procedure day.
         </p>
       </header>
 

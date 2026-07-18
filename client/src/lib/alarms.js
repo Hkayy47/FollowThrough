@@ -13,33 +13,60 @@ export function initAlarms(planAlarms) {
   return alarms;
 }
 
-// The demo alarm rings 10 seconds after the app (Road page) launches.
-// If a pending demo alarm from a previous session already passed, keep it so it
-// surfaces through the missed-alarm flow instead of re-arming.
-export function ensureDemoAlarm() {
+function localDateStr(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function localDateTimeStr(d = new Date()) {
+  return `${localDateStr(d)}T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+}
+
+// The launch check-in rings 10 seconds after the Road page loads and always
+// asks about TODAY's first unfinished task. If nothing is scheduled for today,
+// no alarm fires.
+export function ensureDemoAlarm(timeline, checklist = {}) {
   const alarms = loadAlarms();
-  const demo = alarms.find((a) => a.id === "demo");
-  if (demo && demo.status === "pending") {
-    saveAlarms(alarms);
-    return alarms;
+  const today = localDateStr();
+  const todaysTask = (timeline || []).find(
+    (e) => e.date === today && !checklist[`${e.date}::${e.title}`]
+  );
+  const withoutDemo = alarms.filter((a) => a.id !== "demo");
+  if (!todaysTask) {
+    saveAlarms(withoutDemo);
+    return withoutDemo;
   }
+  const ringAt = new Date(Date.now() + 10_000);
   const next = [
     {
       id: "demo",
-      datetime: new Date(Date.now() + 10_000).toISOString(),
-      question: "Did you take the medication yet?",
+      datetime: localDateTimeStr(ringAt),
+      question: `Today's task: ${todaysTask.title}. Have you done this yet?`,
       status: "pending",
     },
-    ...alarms.filter((a) => a.id !== "demo"),
+    ...withoutDemo,
   ];
   saveAlarms(next);
   return next;
 }
 
+// Only surface alarms that belong to today. Yesterday's misses are visible on
+// the timeline; notifications stay focused on what is due now.
 export function dueAlarms(alarms, now = Date.now()) {
+  const today = localDateStr(new Date(now));
   return alarms.filter(
-    (a) => a.status === "pending" && new Date(a.datetime).getTime() <= now
+    (a) =>
+      a.status === "pending" &&
+      new Date(a.datetime).getTime() <= now &&
+      localDateStr(new Date(a.datetime)) === today
   );
+}
+
+// A patient-added reminder rides the same alarm pipeline.
+export function addCustomAlarm(id, datetime, question) {
+  const alarms = loadAlarms().filter((a) => a.id !== id);
+  alarms.push({ id, datetime, question, status: "pending" });
+  saveAlarms(alarms);
+  return alarms;
 }
 
 export function setAlarmStatus(id, status) {
@@ -60,9 +87,10 @@ export function setTaskReminder(event, enabled) {
   const id = `task-${eventId(event)}`;
   const alarms = loadAlarms().filter((a) => a.id !== id);
   if (enabled) {
+    const clock = event.time && /^\d{1,2}:\d{2}/.test(event.time) ? event.time.slice(0, 5) : "09:00";
     alarms.push({
       id,
-      datetime: `${event.date}T09:00`,
+      datetime: `${event.date}T${clock}`,
       question: `Did you complete: ${event.title}?`,
       status: "pending",
     });

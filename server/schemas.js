@@ -215,9 +215,14 @@ export const planSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["date", "title", "size", "details"],
+        required: ["date", "title", "size", "details", "time"],
         properties: {
           date: { type: "string", description: "YYYY-MM-DD" },
+          time: {
+            type: "string",
+            description:
+              "24h HH:MM when the event has a specific cutoff or dose time (prep doses, NPO cutoff, arrival, med doses); empty string for all-day events",
+          },
           title: { type: "string" },
           size: { type: "string", enum: ["major", "minor"] },
           details: {

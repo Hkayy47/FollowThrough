@@ -105,7 +105,11 @@ export default function ManualMode({ onBack, onComplete, error }) {
         {messages.map((m, i) => (
           <div key={i} className={`bubble ${m.role}`}>{m.content}</div>
         ))}
-        {busy && <div className="bubble assistant typing">•••</div>}
+        {busy && (
+          <div className="bubble assistant typing">
+            Thinking<span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span>
+          </div>
+        )}
       </div>
       {error && <div className="error-banner">⚠️ {error}</div>}
       <div className="chat-input-row">

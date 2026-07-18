@@ -29,20 +29,23 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "40mb" }));
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 
 function firstText(response) {
   const block = response.content.find((b) => b.type === "text");
   return block ? block.text : "";
 }
 
-async function structured({ system, content, schema, max_tokens = 16000 }) {
+async function structured({ system, content, schema, max_tokens = 16000, effort = "medium" }) {
   const response = await client.messages.create({
     model: MODEL,
     max_tokens,
     system,
     messages: [{ role: "user", content }],
-    output_config: { format: { type: "json_schema", schema } },
+    output_config: { effort, format: { type: "json_schema", schema } },
   });
   return JSON.parse(firstText(response));
 }
@@ -108,14 +111,15 @@ app.post(
 app.post(
   "/api/chat",
   wrap(async (req, res) => {
-    const { messages, intake, context } = req.body;
+    const { messages, intake, context, agent, voice } = req.body;
     if (!messages?.length)
       return res.status(400).json({ error: "messages required" });
     const response = await client.messages.create({
       model: MODEL,
-      max_tokens: 4000,
-      system: chatSystem(intake ?? {}, context),
+      max_tokens: voice ? 1000 : 2500,
+      system: chatSystem(intake ?? {}, context, agent, voice),
       messages,
+      output_config: { effort: "low" },
     });
     res.json({ reply: firstText(response) });
   })
@@ -143,6 +147,7 @@ app.post(
       ],
       schema: classifySchema,
       max_tokens: 2000,
+      effort: "low",
     });
     const message = result.adequate
       ? `Great news — your prep looks adequate! ${result.reason} You can stop; you're prepped and ready.`
@@ -176,6 +181,7 @@ app.post(
         },
       ],
       schema: manualIntakeSchema,
+      effort: "low",
     });
     res.json(result);
   })

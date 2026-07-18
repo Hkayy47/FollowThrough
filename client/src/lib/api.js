@@ -13,8 +13,8 @@ async function post(path, body) {
 
 export const extractAvs = (pdfBase64) => post("/api/extract", { pdfBase64 });
 export const buildPlan = (intake) => post("/api/plan", { intake });
-export const chat = (messages, intake, context) =>
-  post("/api/chat", { messages, intake, context });
+export const chat = (messages, intake, opts = {}) =>
+  post("/api/chat", { messages, intake, ...opts }); // opts: { context, agent, voice }
 export const classifyPrep = (imageBase64, mediaType) =>
   post("/api/classify", { imageBase64, mediaType });
 export const manualIntake = (messages, intakeSoFar, specialty, procedure) =>
