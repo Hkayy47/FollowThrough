@@ -297,7 +297,7 @@ export default function ChatDrawer({
         />
         <button
           className="icon-btn call-btn"
-          title="Talk to your care companion by voice"
+          title="Voice mode — talk with your care companion"
           onClick={() => onOpenVoice?.()}
         >
           🎙️

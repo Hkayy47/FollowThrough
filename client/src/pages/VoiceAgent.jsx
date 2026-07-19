@@ -4,19 +4,39 @@ import { chat } from "../lib/api.js";
 const OPENING =
   "Hello, this is your AllClear care companion. I have your preparation plan in front of me. How can I help you today?";
 
+function stripForSpeech(text) {
+  return String(text || "")
+    .replace(/\*\*(.+?)\*\*/gs, "$1")
+    .replace(/[*_`#]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export default function VoiceAgent({ intake, onClose }) {
-  const [entries, setEntries] = useState([{ role: "assistant", content: OPENING, t: new Date() }]);
+  const [entries, setEntries] = useState([]);
   const [phase, setPhase] = useState("idle"); // idle | listening | thinking | speaking
   const [interim, setInterim] = useState("");
   const [supported, setSupported] = useState(true);
+  const [inCall, setInCall] = useState(false);
+  const scrollRef = useRef(null);
   const recRef = useRef(null);
-  const entriesRef = useRef(null);
-  const activeRef = useRef(false);
-  const entriesSnapshot = useRef(entries);
+  const phaseRef = useRef("idle");
+  const inCallRef = useRef(false);
+  const entriesRef = useRef([]);
+  const startingListen = useRef(false);
 
   useEffect(() => {
-    entriesSnapshot.current = entries;
+    entriesRef.current = entries;
   }, [entries]);
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
+  useEffect(() => {
+    inCallRef.current = inCall;
+  }, [inCall]);
+  useEffect(() => {
+    scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
+  }, [entries, interim, phase]);
 
   useEffect(() => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -24,10 +44,13 @@ export default function VoiceAgent({ intake, onClose }) {
       setSupported(false);
       return;
     }
+
     const rec = new SR();
     rec.lang = "en-US";
     rec.interimResults = true;
     rec.continuous = false;
+    rec.maxAlternatives = 1;
+
     rec.onresult = (e) => {
       let finalText = "";
       let interimText = "";
@@ -38,15 +61,50 @@ export default function VoiceAgent({ intake, onClose }) {
       setInterim(interimText);
       if (finalText.trim()) handleUtterance(finalText.trim());
     };
-    rec.onerror = () => setPhase("idle");
-    rec.onend = () => {
-      setInterim("");
-      setPhase((p) => (p === "listening" ? "idle" : p));
+
+    rec.onerror = (e) => {
+      startingListen.current = false;
+      // Keep the call alive; retry listen after a brief pause.
+      if (!inCallRef.current) {
+        setPhase("idle");
+        return;
+      }
+      if (e.error === "aborted" || e.error === "no-speech") {
+        setTimeout(() => {
+          if (inCallRef.current && phaseRef.current !== "speaking" && phaseRef.current !== "thinking") {
+            startListening();
+          }
+        }, 400);
+        return;
+      }
+      setPhase("idle");
     };
+
+    rec.onend = () => {
+      startingListen.current = false;
+      setInterim("");
+      // If still in a call and we were listening (utterance not yet handed off), resume.
+      if (
+        inCallRef.current &&
+        phaseRef.current === "listening" &&
+        !startingListen.current
+      ) {
+        setTimeout(() => {
+          if (inCallRef.current && phaseRef.current === "listening") startListening();
+        }, 250);
+      }
+    };
+
     recRef.current = rec;
-    speak(OPENING, () => {});
+
+    // Warm up voices list (Chrome loads them async).
+    window.speechSynthesis?.getVoices();
+    window.speechSynthesis?.addEventListener?.("voiceschanged", () => {
+      window.speechSynthesis.getVoices();
+    });
+
     return () => {
-      activeRef.current = false;
+      inCallRef.current = false;
       try {
         rec.abort();
       } catch {
@@ -57,44 +115,81 @@ export default function VoiceAgent({ intake, onClose }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    entriesRef.current?.scrollTo(0, entriesRef.current.scrollHeight);
-  }, [entries, interim]);
+  function pickVoice() {
+    const voices = window.speechSynthesis?.getVoices?.() || [];
+    return (
+      voices.find((v) => /en(-|_)US/i.test(v.lang) && /female|aria|jenny|zira|samantha|google us english/i.test(v.name)) ||
+      voices.find((v) => /en(-|_)US/i.test(v.lang)) ||
+      voices.find((v) => /en/i.test(v.lang)) ||
+      null
+    );
+  }
 
   function speak(text, onDone) {
     const synth = window.speechSynthesis;
-    if (!synth) return onDone?.();
-    setPhase("speaking");
-    const u = new SpeechSynthesisUtterance(text);
-    u.rate = 0.98;
-    u.pitch = 0.95;
-    const voices = synth.getVoices();
-    u.voice =
-      voices.find((v) => /en(-|_)US/i.test(v.lang) && /female|aria|jenny|zira|samantha/i.test(v.name)) ||
-      voices.find((v) => /en/i.test(v.lang)) ||
-      null;
-    u.onend = () => {
+    const clean = stripForSpeech(text);
+    if (!synth || !clean) {
       setPhase("idle");
       onDone?.();
-    };
+      return;
+    }
+    setPhase("speaking");
+    phaseRef.current = "speaking";
     synth.cancel();
-    synth.speak(u);
+
+    const u = new SpeechSynthesisUtterance(clean);
+    u.rate = 1;
+    u.pitch = 1;
+    u.voice = pickVoice();
+    u.onend = () => {
+      setPhase("idle");
+      phaseRef.current = "idle";
+      onDone?.();
+    };
+    u.onerror = () => {
+      setPhase("idle");
+      phaseRef.current = "idle";
+      onDone?.();
+    };
+    // Small delay helps some browsers actually route audio after cancel().
+    setTimeout(() => synth.speak(u), 40);
   }
 
   function startListening() {
-    if (!recRef.current || phase === "listening") return;
+    if (!recRef.current || !inCallRef.current) return;
+    if (phaseRef.current === "speaking" || phaseRef.current === "thinking") return;
+    if (startingListen.current) return;
+
     window.speechSynthesis?.cancel();
-    activeRef.current = true;
+    startingListen.current = true;
     setPhase("listening");
+    phaseRef.current = "listening";
     try {
       recRef.current.start();
     } catch {
-      /* already started */
+      // Already started — force restart.
+      try {
+        recRef.current.stop();
+      } catch {
+        /* ignore */
+      }
+      setTimeout(() => {
+        if (!inCallRef.current) return;
+        try {
+          recRef.current.start();
+          setPhase("listening");
+          phaseRef.current = "listening";
+        } catch {
+          startingListen.current = false;
+        }
+      }, 200);
     }
   }
 
-  function stopAll() {
-    activeRef.current = false;
+  function endCall() {
+    inCallRef.current = false;
+    setInCall(false);
+    startingListen.current = false;
     try {
       recRef.current?.abort();
     } catch {
@@ -102,41 +197,67 @@ export default function VoiceAgent({ intake, onClose }) {
     }
     window.speechSynthesis?.cancel();
     setPhase("idle");
+    phaseRef.current = "idle";
+    setInterim("");
+  }
+
+  function startCall() {
+    if (!supported) return;
+    inCallRef.current = true;
+    setInCall(true);
+    const opening = { role: "assistant", content: OPENING, t: new Date() };
+    entriesRef.current = [opening];
+    setEntries([opening]);
+    speak(OPENING, () => {
+      if (inCallRef.current) startListening();
+    });
   }
 
   function handleClose() {
-    stopAll();
+    endCall();
     onClose?.();
   }
 
   async function handleUtterance(text) {
+    if (!text || phaseRef.current === "thinking" || phaseRef.current === "speaking") return;
+    startingListen.current = false;
     try {
-      recRef.current?.abort();
+      recRef.current?.stop();
     } catch {
       /* ignore */
     }
     setInterim("");
+
     const userEntry = { role: "user", content: text, t: new Date() };
-    setEntries((prev) => [...prev, userEntry]);
+    const historyBase = [...entriesRef.current, userEntry];
+    entriesRef.current = historyBase;
+    setEntries(historyBase);
     setPhase("thinking");
+    phaseRef.current = "thinking";
+
     try {
-      const history = [
-        ...entriesSnapshot.current.map((e) => ({ role: e.role, content: e.content })),
-        { role: "user", content: text },
-      ];
+      const history = historyBase.map((e) => ({ role: e.role, content: e.content }));
       const { reply } = await chat(history, intake, { voice: true });
-      setEntries((prev) => [...prev, { role: "assistant", content: reply, t: new Date() }]);
+      const assistantEntry = { role: "assistant", content: reply, t: new Date() };
+      const next = [...entriesRef.current, assistantEntry];
+      entriesRef.current = next;
+      setEntries(next);
       speak(reply, () => {
-        if (activeRef.current) startListening();
+        if (inCallRef.current) startListening();
       });
     } catch (e) {
       const msg = `I am sorry, I could not process that. ${e.message}`;
-      setEntries((prev) => [...prev, { role: "assistant", content: msg, t: new Date() }]);
-      setPhase("idle");
+      const next = [...entriesRef.current, { role: "assistant", content: msg, t: new Date() }];
+      entriesRef.current = next;
+      setEntries(next);
+      speak(msg, () => {
+        if (inCallRef.current) startListening();
+      });
     }
   }
 
   function downloadTranscript() {
+    if (!entries.length) return;
     const lines = entries.map(
       (e) =>
         `[${e.t.toLocaleTimeString()}] ${e.role === "user" ? "Patient" : "AllClear Companion"}: ${e.content}`
@@ -151,35 +272,53 @@ export default function VoiceAgent({ intake, onClose }) {
     URL.revokeObjectURL(url);
   }
 
+  const statusLabel = !inCall
+    ? "Tap Start call to talk with your care companion"
+    : phase === "listening"
+    ? "Listening… speak naturally"
+    : phase === "thinking"
+    ? "Thinking…"
+    : phase === "speaking"
+    ? "Speaking…"
+    : "On the call";
+
   return (
-    <div className="voice-overlay" role="dialog" aria-label="Voice companion">
-      <button className="voice-backdrop" aria-label="Close voice companion" onClick={handleClose} />
+    <div className="voice-overlay" role="dialog" aria-label="Voice mode">
+      <button className="voice-backdrop" aria-label="Close voice mode" onClick={handleClose} />
       <div className="voice-sheet">
         <header className="voice-sheet-head">
-          <button className="voice-back" onClick={handleClose} title="Back to chat">
+          <button className="voice-back" onClick={handleClose} title="Back">
             ← Back
           </button>
           <div className="voice-sheet-titles">
-            <h3>Voice companion</h3>
-            <p>Talk it through, then return to your plan</p>
+            <h3>Voice mode</h3>
+            <p>{inCall ? "Live call with your care companion" : "Hands-free conversation"}</p>
           </div>
-          <button className="icon-btn" title="Download transcript" onClick={downloadTranscript}>
+          <button
+            className="icon-btn"
+            title="Download transcript"
+            onClick={downloadTranscript}
+            disabled={!entries.length}
+          >
             ⬇️
           </button>
         </header>
 
         {!supported ? (
           <div className="voice-unsupported">
-            <p>
-              Voice input needs Chrome or Edge. You can keep using the text chat instead.
-            </p>
+            <p>Voice mode needs Chrome or Edge with microphone access.</p>
             <button className="btn primary" onClick={handleClose}>
-              Back to chat
+              Back
             </button>
           </div>
         ) : (
           <>
-            <div className="chat-scroll voice-scroll" ref={entriesRef}>
+            <div className={`voice-orb-wrap ${phase} ${inCall ? "live" : ""}`}>
+              <div className="voice-orb" aria-hidden="true" />
+              <p className="voice-status">{statusLabel}</p>
+            </div>
+
+            <div className="chat-scroll voice-scroll" ref={scrollRef}>
               {entries.map((e, i) => (
                 <div key={i} className={`bubble ${e.role}`}>
                   {e.content}
@@ -194,26 +333,25 @@ export default function VoiceAgent({ intake, onClose }) {
             </div>
 
             <div className="voice-controls">
-              <p className="voice-status">
-                {phase === "listening"
-                  ? "Listening…"
-                  : phase === "thinking"
-                  ? "Thinking…"
-                  : phase === "speaking"
-                  ? "Speaking…"
-                  : "Tap the microphone and speak"}
-              </p>
-              <div className="voice-buttons">
-                <button
-                  className={`mic-btn ${phase === "listening" ? "live" : ""}`}
-                  onClick={phase === "listening" ? stopAll : startListening}
-                >
-                  {phase === "listening" ? "◼" : "🎙️"}
+              {!inCall ? (
+                <button className="mic-btn" onClick={startCall} title="Start call">
+                  🎙️
                 </button>
-              </div>
-              <button className="btn subtle-link" onClick={downloadTranscript}>
-                Save transcript
-              </button>
+              ) : (
+                <button className="mic-btn end" onClick={endCall} title="End call">
+                  ⏹
+                </button>
+              )}
+              <p className="voice-hint">
+                {!inCall
+                  ? "Start call — the agent speaks, then listens"
+                  : "End call when you are done"}
+              </p>
+              {entries.length > 0 && (
+                <button className="btn subtle-link" onClick={downloadTranscript}>
+                  Save transcript
+                </button>
+              )}
             </div>
           </>
         )}
