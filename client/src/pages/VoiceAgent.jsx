@@ -138,7 +138,7 @@ export default function VoiceAgent({ intake, onClose }) {
     synth.cancel();
 
     const u = new SpeechSynthesisUtterance(clean);
-    u.rate = 1;
+    u.rate = 1.5;
     u.pitch = 1;
     u.voice = pickVoice();
     u.onend = () => {
